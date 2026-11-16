@@ -71,6 +71,23 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
+    // Open a validated bookmark URL in the current tab or a new background tab
+    function openBookmark(url, inNewTab = false) {
+        if (!isSafeUrl(url)) {
+            showToast('Blocked: unsafe URL', 'error');
+            return;
+        }
+        if (inNewTab) {
+            chrome.tabs.create({ url, active: false });
+            return;
+        }
+        chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+            if (tabs[0]) {
+                chrome.tabs.update(tabs[0].id, { url });
+            }
+        });
+    }
+
     // Security: Create SVG elements without innerHTML
     function createSVGIcon(pathData, size = 16, fill = 'none', strokeFill = 'currentColor') {
         const ns = 'http://www.w3.org/2000/svg';
@@ -151,8 +168,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Context menu action: Open in New Tab
     menuOpenNewTab.addEventListener('click', () => {
-        if (contextTarget && contextTarget.url && isSafeUrl(contextTarget.url)) {
-            chrome.tabs.create({ url: contextTarget.url, active: false });
+        if (contextTarget && contextTarget.url) {
+            openBookmark(contextTarget.url, true);
         }
         contextMenu.style.display = 'none';
     });
@@ -533,24 +550,15 @@ document.addEventListener('DOMContentLoaded', () => {
                     if (iconEl.parentNode) iconEl.replaceWith(fallback);
                 };
 
-                li.addEventListener('click', () => {
-                    if (!isSafeUrl(bookmark.url)) {
-                        showToast('Blocked: unsafe URL', 'error');
-                        return;
-                    }
-                    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-                        if (tabs[0]) {
-                            chrome.tabs.update(tabs[0].id, { url: bookmark.url });
-                        }
-                    });
+                li.addEventListener('click', (e) => {
+                    openBookmark(bookmark.url, e.ctrlKey || e.metaKey);
                 });
 
                 // Middle-click to open in background
                 li.addEventListener('mousedown', (e) => {
                     if (e.button === 1) {
                         e.preventDefault();
-                        if (!isSafeUrl(bookmark.url)) return;
-                        chrome.tabs.create({ url: bookmark.url, active: false });
+                        openBookmark(bookmark.url, true);
                     }
                 });
             } else {
@@ -611,6 +619,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
         if (addedCount > 0) {
             bookmarkList.appendChild(fragment);
+            if (isSearching) {
+                currentIndex = 0;
+                updateSelection(bookmarkList.querySelectorAll('li'));
+            }
         } else {
             const emptyLi = document.createElement('li');
             emptyLi.className = 'empty-state';
@@ -666,8 +678,9 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         }
 
-        // If a modal is open, don't handle list navigation
+        // If a modal or inline input (other than search) is active, don't hijack navigation keys
         if (deleteModal.style.display !== 'none' || newFolderModal.style.display !== 'none') return;
+        if (e.target && e.target.tagName === 'INPUT' && e.target !== searchInput) return;
 
         // Shortcut: Alt+N or Ctrl+Shift+N to create new folder
         if ((e.altKey && e.key.toLowerCase() === 'n') || (e.ctrlKey && e.shiftKey && e.key.toLowerCase() === 'n')) {
@@ -709,7 +722,12 @@ document.addEventListener('DOMContentLoaded', () => {
         } else if (e.key === 'Enter') {
             if (currentIndex >= 0 && currentIndex < items.length) {
                 e.preventDefault();
-                items[currentIndex].click();
+                items[currentIndex].dispatchEvent(new MouseEvent('click', {
+                    bubbles: true,
+                    cancelable: true,
+                    ctrlKey: e.ctrlKey,
+                    metaKey: e.metaKey
+                }));
             }
         } else if (e.key === 'ArrowLeft' && !isSearching) {
             e.preventDefault();
