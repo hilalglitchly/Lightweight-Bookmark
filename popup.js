@@ -354,14 +354,29 @@ document.addEventListener('DOMContentLoaded', () => {
     // Bookmark current tab into current folder
     addBookmarkBtn.addEventListener('click', () => {
         chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-            if (tabs && tabs[0]) {
-                const targetFolderId = (currentFolderId === '0' || !currentFolderId) ? '1' : currentFolderId;
-                const folderLabel = currentFolderId === '0' ? 'Bookmarks bar' : currentFolderName;
+            if (!tabs || !tabs[0] || !tabs[0].url) return;
+            const tab = tabs[0];
+            if (!isSafeUrl(tab.url)) {
+                showToast('Cannot bookmark this URL', 'error');
+                return;
+            }
+            const targetFolderId = (currentFolderId === '0' || !currentFolderId) ? '1' : currentFolderId;
+            const folderLabel = currentFolderId === '0' ? 'Bookmarks bar' : currentFolderName;
+
+            chrome.bookmarks.search({ url: tab.url }, (existing) => {
+                if (!chrome.runtime.lastError && existing && existing.length > 0) {
+                    const match = existing.find(b => b.parentId === targetFolderId) || existing[0];
+                    chrome.bookmarks.get(match.parentId, (parents) => {
+                        const savedIn = (parents && parents[0] && parents[0].title) || 'Bookmarks';
+                        showToast(`Already saved in "${savedIn}"`);
+                    });
+                    return;
+                }
 
                 chrome.bookmarks.create({
                     parentId: targetFolderId,
-                    title: tabs[0].title || 'New Bookmark',
-                    url: tabs[0].url
+                    title: tab.title || 'New Bookmark',
+                    url: tab.url
                 }, (created) => {
                     if (chrome.runtime.lastError) {
                         showToast(`Failed: ${chrome.runtime.lastError.message}`, 'error');
@@ -372,7 +387,7 @@ document.addEventListener('DOMContentLoaded', () => {
                         fetchAndRenderFolder(currentFolderId);
                     }
                 });
-            }
+            });
         });
     });
 
